@@ -435,7 +435,7 @@ Item {
                 fillMode: Image.PreserveAspectFit
                 sourceSize.width: width * Screen.devicePixelRatio
                 sourceSize.height: height * Screen.devicePixelRatio
-                source: visible && root.appLibrary ? root.appLibrary.iconSource(xmbRow.appIcon) : ""
+                source: visible ? root.appIconSource(xmbRow.appIcon) : ""
                 asynchronous: true
               }
 
@@ -551,7 +551,7 @@ Item {
               fillMode: Image.PreserveAspectFit
               sourceSize.width: width * Screen.devicePixelRatio
               sourceSize.height: height * Screen.devicePixelRatio
-              source: visible && root.appLibrary ? root.appLibrary.iconSource(row.appIcon) : ""
+              source: visible ? root.appIconSource(row.appIcon) : ""
               asynchronous: true
             }
 
@@ -960,19 +960,69 @@ Item {
     return MenuModel.slugify(value)
   }
 
+  // Some hosts (third-party/cloned menu plugins going through Omarchy's
+  // scoped plugin-shell proxy) hand back shell.appLibrary === null instead
+  // of a working AppLibrary API — see fallbackAppEntries() below. Reading
+  // DesktopEntries directly keeps the Apps submenu working either way.
+  function fallbackAppEntries() {
+    var values = (DesktopEntries.applications && DesktopEntries.applications.values) || []
+    var rows = []
+    for (var i = 0; i < values.length; i++) {
+      var entry = values[i]
+      if (!entry || entry.noDisplay) continue
+      if (root.fallbackHiddenEntryIds[String(entry.id || "")] === true) continue
+      rows.push({ entry: entry })
+    }
+    return rows
+  }
+
+  function appEntryLabel(entry) {
+    if (root.appLibrary) return root.appLibrary.entryName(entry)
+    return String(entry.name || entry.id || "")
+  }
+
+  function appEntrySubtext(entry) {
+    if (root.appLibrary) return root.appLibrary.entrySubtext(entry)
+    return String(entry.genericName || "")
+  }
+
+  // Falls back to Qt's themed icon lookup so app rows still get an icon
+  // when root.appLibrary is unavailable (see fallbackAppEntries()).
+  function appIconSource(icon) {
+    if (root.appLibrary) return root.appLibrary.iconSource(icon)
+    var value = String(icon || "")
+    if (value.length === 0) return Quickshell.iconPath("application-x-executable", true)
+    if (value.indexOf("file://") === 0 || value.indexOf("image://") === 0) return value
+    if (value.charAt(0) === "/") return "file://" + value
+    var themed = Quickshell.iconPath(value, true)
+    return themed.length > 0 ? themed : Quickshell.iconPath("application-x-executable", true)
+  }
+
+  function launchApp(appId, label) {
+    if (root.appLibrary) { root.appLibrary.launch(appId, label); return }
+    var id = String(appId || "")
+    if (!id) return
+    Quickshell.execDetached(["uwsm-app", "--", "gtk-launch", id + ".desktop"])
+  }
+
+  function removeApp(appId, label) {
+    if (root.appLibrary) { root.appLibrary.remove(appId, label); return }
+    var id = String(appId || "")
+    if (!id) return
+    Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-remove-launcher-entry", id, String(label || id)])
+  }
+
   // The apps provider is QML-native: rows come from the shared AppLibrary
   // (DesktopEntries) instead of a bash enumeration, so they carry image
   // icons, launch feedback, and uninstall support like the launcher.
   function mergeAppRows() {
-    if (!root.appLibrary) return
-
-    var rows = root.appLibrary.sortedEntries("")
+    var rows = root.appLibrary ? root.appLibrary.sortedEntries("") : root.fallbackAppEntries()
     var appRows = []
     for (var j = 0; j < rows.length; j++) {
       var entry = rows[j].entry
       var appId = String(entry.id || "")
       if (!appId) continue
-      var subtext = root.appLibrary.entrySubtext(entry)
+      var subtext = root.appEntrySubtext(entry)
       var aliases = subtext ? [subtext] : []
       try {
         if (entry.keywords && typeof entry.keywords.join === "function") aliases = aliases.concat(entry.keywords)
@@ -984,7 +1034,7 @@ Item {
         icon: "",
         appIcon: String(entry.icon || ""),
         appId: appId,
-        label: root.appLibrary.entryName(entry),
+        label: root.appEntryLabel(entry),
         title: "",
         target: "",
         description: subtext,
@@ -1403,7 +1453,7 @@ Item {
       applySerial = requestSerial
       opened = false
       filterText = ""
-      if (root.appLibrary) root.appLibrary.launch(appId, label)
+      root.launchApp(appId, label)
     } else {
       root.applySelected(row.itemId, row.action)
     }
@@ -1431,7 +1481,7 @@ Item {
     root.deleteTarget = null
     if (!target) return
     root.cancel()
-    if (root.appLibrary) root.appLibrary.remove(target.appId, target.label)
+    root.removeApp(target.appId, target.label)
   }
 
   function applyDmenuSelection(value) {
@@ -1570,6 +1620,16 @@ Item {
     }
   }
 
+  // Mirrors the Connections above for the fallbackAppEntries() path, so the
+  // Apps submenu still picks up newly installed apps when root.appLibrary
+  // is unavailable.
+  Connections {
+    target: root.appLibrary ? null : DesktopEntries.applications
+    function onValuesChanged() {
+      if (root.providersLoaded["apps"]) root.mergeAppRows()
+    }
+  }
+
   // The JSONC sources are watched so live edits to the default file (or the
   // user extension at ~/.config/omarchy/extensions/omarchy-menu.jsonc) take
   // effect without restarting the shell.
@@ -1589,6 +1649,29 @@ Item {
     printErrors: false
     onLoaded: { root.userMenuItems = root.parseMenuJsonc(text()); root.rebuildItemsFromSources() }
     onLoadFailed: { root.userMenuItems = []; root.rebuildItemsFromSources() }
+    onFileChanged: reload()
+  }
+
+  // Only consulted by fallbackAppEntries(): when root.appLibrary is
+  // available it already applies this same list itself.
+  property var fallbackHiddenEntryIds: ({})
+
+  function loadFallbackHiddenEntries(rawText) {
+    var next = ({})
+    var lines = String(rawText || "").split(/\n/)
+    for (var i = 0; i < lines.length; i++) {
+      var id = lines[i].trim()
+      if (id.length > 0) next[id] = true
+    }
+    root.fallbackHiddenEntryIds = next
+    if (!root.appLibrary && root.providersLoaded["apps"]) root.mergeAppRows()
+  }
+
+  FileView {
+    path: root.omarchyPath + "/default/omarchy/launcher.hides"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.loadFallbackHiddenEntries(text())
     onFileChanged: reload()
   }
 
