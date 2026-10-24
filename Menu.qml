@@ -196,6 +196,11 @@ Item {
             return
           }
 
+          if (root.dmenuActive) {
+            if (root.handleDmenuKey(event)) event.accepted = true
+            return
+          }
+
           if (event.key === Qt.Key_Delete) {
             root.requestDeleteSelected()
             event.accepted = true
@@ -271,7 +276,7 @@ Item {
       Text {
         anchors.right: parent.right
         anchors.top: parent.top
-        text: root.filterText ? "Search: " + root.filterText : "OMARCHY  /  XMB"
+        text: root.filterText && root.mode !== "input" ? "Search: " + root.filterText : "OMARCHY  /  XMB"
         color: "white"
         opacity: 0.72
         font.family: root.fontFamily
@@ -287,6 +292,7 @@ Item {
         anchors.topMargin: Math.max(56, panel.height * 0.08)
         height: Math.max(112, panel.height * 0.17)
         clip: false
+        visible: !root.dmenuActive
         readonly property real delegateWidth: Math.max(88, panel.width * 0.072)
         readonly property real categoryStep: Math.max(108, panel.width * 0.08)
         // Leave room for earlier categories on the left. All delegates move
@@ -361,6 +367,51 @@ Item {
         }
       }
 
+      // A picker takes over the category band: its prompt sits where the
+      // selected category would, and its options run through the same
+      // vertical carousel as a submenu.
+      Column {
+        visible: root.dmenuActive
+        x: Math.max(0, card.categoryAnchorCenterX - 27)
+        width: Math.min(Math.max(420, panel.width * 0.34), parent.width - x)
+        anchors.verticalCenter: categoryList.verticalCenter
+        spacing: 10
+
+        Text {
+          width: parent.width
+          text: root.dmenuPrompt
+          color: "white"
+          font.family: root.fontFamily
+          font.pixelSize: Math.max(26, panel.height * 0.032)
+          font.weight: Font.Light
+          elide: Text.ElideRight
+          style: Text.Raised
+          styleColor: Qt.rgba(0, 0, 0, 0.55)
+        }
+
+        Text {
+          width: parent.width
+          visible: root.mode === "input"
+          text: root.filterText + "▏"
+          color: "white"
+          font.family: root.fontFamily
+          font.pixelSize: 23
+          font.weight: Font.DemiBold
+          elide: Text.ElideLeft
+        }
+
+        Text {
+          width: parent.width
+          text: root.mode === "input"
+            ? "Enter  confirm      Esc  cancel"
+            : "Enter  select      Esc  cancel      Type to filter"
+          color: Qt.rgba(1, 1, 1, 0.5)
+          font.family: root.fontFamily
+          font.pixelSize: 12
+          font.letterSpacing: 1
+        }
+      }
+
       Column {
         anchors.left: parent.left
         anchors.leftMargin: Math.max(0, card.categoryAnchorCenterX - 27)
@@ -389,7 +440,6 @@ Item {
           id: xmbResultList
           width: parent.width
           height: parent.height
-          visible: !root.dmenuActive
           clip: true
 
           Repeater {
@@ -475,7 +525,7 @@ Item {
 
                 Text {
                   width: parent.width
-                  visible: root.filterText && xmbRow.detail.length > 0
+                  visible: (root.filterText || root.dmenuActive) && xmbRow.detail.length > 0
                   text: xmbRow.detail
                   color: Qt.rgba(1, 1, 1, 0.55)
                   font.family: root.fontFamily
@@ -491,138 +541,11 @@ Item {
               }
             }
           }
-        }
-
-        ListView {
-          id: resultList
-          width: parent.width
-          height: parent.height - y
-          model: displayModel
-          visible: root.dmenuActive
-          clip: true
-          spacing: 3
-          boundsBehavior: Flickable.StopAtBounds
-          currentIndex: root.selectedIndex
-          // The selected delegate begins at the top of the protected category
-          // band. Its visual content sits at the delegate's bottom, leaving
-          // the horizontal category unobstructed between prior and current rows.
-          preferredHighlightBegin: root.dmenuActive ? 6 : categoryList.y
-          preferredHighlightEnd: preferredHighlightBegin
-          highlightRangeMode: ListView.StrictlyEnforceRange
-          header: Item {
-            width: 1
-            height: root.dmenuActive ? 0 : resultList.preferredHighlightBegin
-          }
-          footer: Item {
-            width: 1
-            height: root.dmenuActive ? 0 : Math.max(0, resultList.height - resultList.preferredHighlightBegin - categoryList.height - 84)
-          }
-
-          delegate: Rectangle {
-            id: row
-            required property int index
-            required property string itemId
-            required property string kind
-            required property string icon
-            required property string iconFont
-            required property string appIcon
-            required property string appId
-            required property string label
-            required property string target
-            required property string detail
-            required property string path
-            required property string action
-            required property int childCount
-            width: ListView.view.width
-            readonly property bool selected: root.cursorActive && index === root.selectedIndex
-            readonly property real visualHeight: selected ? 72 : (detail.length && root.filterText ? 58 : 48)
-            readonly property real visualTop: selected && !root.dmenuActive ? height - visualHeight : 0
-            height: selected && !root.dmenuActive ? categoryList.height + visualHeight + 12 : visualHeight
-            color: "transparent"
-            opacity: selected ? 1.0 : 0.48
-            Behavior on opacity { NumberAnimation { duration: 110 } }
-
-            Image {
-              id: appImage
-              visible: row.kind === "app"
-              width: row.selected ? 48 : 30
-              height: width
-              anchors.left: parent.left
-              y: row.visualTop + (row.visualHeight - height) / 2
-              fillMode: Image.PreserveAspectFit
-              sourceSize.width: width * Screen.devicePixelRatio
-              sourceSize.height: height * Screen.devicePixelRatio
-              source: visible && root.appLibrary ? root.appLibrary.iconSource(row.appIcon) : ""
-              asynchronous: true
-            }
-
-            Text {
-              id: rowIcon
-              visible: row.kind !== "app"
-              width: row.selected ? 54 : 38
-              anchors.left: parent.left
-              height: row.visualHeight
-              y: row.visualTop
-              verticalAlignment: Text.AlignVCenter
-              text: row.icon || "•"
-              color: "white"
-              horizontalAlignment: Text.AlignHCenter
-              font.family: row.iconFont.length ? row.iconFont : root.fontFamily
-              font.pixelSize: row.selected ? 42 : 24
-              Behavior on font.pixelSize { NumberAnimation { duration: 120 } }
-            }
-
-            Column {
-              anchors.left: rowIcon.right
-              anchors.leftMargin: row.selected ? 14 : 10
-              anchors.right: chevron.left
-              anchors.rightMargin: 8
-              y: row.visualTop + (row.visualHeight - height) / 2
-              spacing: 1
-              Text {
-                width: parent.width
-                text: row.label
-                color: "white"
-                font.family: root.fontFamily
-                font.pixelSize: row.selected ? 23 : 17
-                font.weight: row.selected ? Font.DemiBold : Font.Normal
-                Behavior on font.pixelSize { NumberAnimation { duration: 120 } }
-                elide: Text.ElideRight
-              }
-              Text {
-                width: parent.width
-                visible: root.filterText && row.detail.length > 0
-                text: row.detail
-                color: Qt.rgba(1, 1, 1, 0.55)
-                font.family: root.fontFamily
-                font.pixelSize: 12
-                elide: Text.ElideRight
-              }
-            }
-
-            Text {
-              id: chevron
-              anchors.right: parent.right; anchors.rightMargin: 12
-              y: row.visualTop + (row.visualHeight - height) / 2
-              text: row.kind === "menu" || row.kind === "link" ? "›" : ""
-              color: "white"
-              opacity: 0.65
-              font.pixelSize: 22
-            }
-
-            MouseArea {
-              x: 0
-              y: row.visualTop
-              width: parent.width
-              height: row.visualHeight
-              cursorShape: Qt.PointingHandCursor
-              onClicked: { root.selectedIndex = row.index; root.activateIndex(row.index, true) }
-            }
-          }
 
           Text {
-            anchors.centerIn: parent
-            visible: displayModel.count === 0 && root.mode !== "input"
+            x: 48
+            y: categoryList.y + categoryList.height + 12
+            visible: root.dmenuActive && root.mode !== "input" && displayModel.count === 0
             text: root.filterText ? "No matches" : "Nothing here yet"
             color: "white"
             opacity: 0.62
@@ -1241,10 +1164,6 @@ Item {
     if (displayModel.count === 0) selectedIndex = 0
     else if (selectedIndex >= displayModel.count) selectedIndex = displayModel.count - 1
     else if (selectedIndex < 0) selectedIndex = 0
-
-    Qt.callLater(function() {
-      if (displayModel.count > 0) root.revealCursor()
-    })
   }
 
   function rebuildDisplay() {
@@ -1314,35 +1233,6 @@ Item {
     if (displayModel.count === 0) selectedIndex = 0
     else if (selectedIndex >= displayModel.count) selectedIndex = displayModel.count - 1
     else if (selectedIndex < 0) selectedIndex = 0
-
-    Qt.callLater(function() {
-      if (displayModel.count > 0) root.revealCursor()
-    })
-  }
-
-  // Contain alone parks the cursor row flush with the viewport edge, hiding
-  // the neighbor entirely and losing the fold affordance. Keep the next
-  // hidden row peeking past the cursor in the direction of travel.
-  function revealCursor() {
-    if (displayModel.count === 0) return
-    // The XMB carousel positions rows explicitly around the protected category
-    // band. Only dmenu mode still needs ListView scrolling assistance.
-    if (!root.dmenuActive) return
-    resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
-
-    var item = resultList.itemAtIndex(root.selectedIndex)
-    if (!item) return
-
-    var reach = root.rowPeek + root.rowSpacing
-    if (root.selectedIndex < displayModel.count - 1) {
-      var maxY = Math.max(resultList.originY, resultList.originY + resultList.contentHeight - resultList.height)
-      var overhang = item.y + item.height + reach - (resultList.contentY + resultList.height)
-      if (overhang > 0) resultList.contentY = Math.min(resultList.contentY + overhang, maxY)
-    }
-    if (root.selectedIndex > 0) {
-      var underhang = resultList.contentY - (item.y - reach)
-      if (underhang > 0) resultList.contentY = Math.max(resultList.contentY - underhang, resultList.originY)
-    }
   }
 
   function select(delta) {
@@ -1352,9 +1242,10 @@ Item {
       cursorActive = true
       selectedIndex = delta < 0 ? displayModel.count - 1 : 0
     } else {
-      selectedIndex = (selectedIndex + delta + displayModel.count) % displayModel.count
+      // Page Up can move farther than the length of a short list. JavaScript
+      // remainder may be negative, so normalize it before using it as an index.
+      selectedIndex = ((selectedIndex + delta) % displayModel.count + displayModel.count) % displayModel.count
     }
-    revealCursor()
   }
 
   function setFilter(nextFilter) {
@@ -1423,6 +1314,38 @@ Item {
     } else {
       root.applySelected(row.itemId, row.action)
     }
+  }
+
+  // A picker summoned by omarchy-menu-select or omarchy-menu-input has no
+  // category carousel to drive, so the root-menu bindings would switch
+  // categories (or run a category's action) instead of picking an option.
+  function handleDmenuKey(event) {
+    var key = event.key
+    if (key === Qt.Key_Escape) {
+      if (root.filterText) root.setFilter("")
+      else root.cancel()
+    } else if (Util.editsFilter(event, root.filterText)) {
+      root.setFilter(Util.editedFilter(event, root.filterText))
+    } else if ((key === Qt.Key_Backspace || key === Qt.Key_Left) && !root.filterText) {
+      root.cancel()
+    } else if (key === Qt.Key_Up) {
+      root.select(-1)
+    } else if (key === Qt.Key_Down) {
+      root.select(1)
+    } else if (key === Qt.Key_PageUp) {
+      root.select(-6)
+    } else if (key === Qt.Key_PageDown) {
+      root.select(6)
+    } else if (key === Qt.Key_Return || key === Qt.Key_Enter) {
+      root.activateIndex(root.cursorActive ? root.selectedIndex : 0)
+    } else if (key === Qt.Key_Right && root.mode !== "input") {
+      root.activateIndex(root.selectedIndex)
+    } else if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127 && (event.modifiers === Qt.NoModifier || event.modifiers === Qt.ShiftModifier)) {
+      root.setFilter(root.filterText + event.text)
+    } else {
+      return false
+    }
+    return true
   }
 
   function requestDeleteSelected() {
