@@ -373,7 +373,9 @@ Item {
       Column {
         visible: root.dmenuActive
         x: Math.max(0, card.categoryAnchorCenterX - 27)
-        width: Math.min(Math.max(420, panel.width * 0.34), parent.width - x)
+        width: Math.min(root.dmenuActive
+          ? Math.max(420, Style.space(root.dmenuWidth), panel.width * 0.5)
+          : Math.max(420, panel.width * 0.34), parent.width - x - (root.dmenuActive ? 32 : 0))
         anchors.verticalCenter: categoryList.verticalCenter
         spacing: 10
 
@@ -417,7 +419,9 @@ Item {
         anchors.leftMargin: Math.max(0, card.categoryAnchorCenterX - 27)
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        width: Math.min(Math.max(420, panel.width * 0.34), parent.width - x)
+        width: Math.min(root.dmenuActive
+          ? Math.max(420, Style.space(root.dmenuWidth), panel.width * 0.5)
+          : Math.max(420, panel.width * 0.34), parent.width - x - (root.dmenuActive ? 32 : 0))
         spacing: 0
         visible: root.activeMenu !== "root" || root.filterText || root.dmenuActive
 
@@ -463,14 +467,23 @@ Item {
 
               readonly property bool selected: root.cursorActive && index === root.selectedIndex
               readonly property real selectedY: categoryList.y + categoryList.height + 12
-              readonly property real rowStep: 52
+              // Keybinding labels contain a padded shortcut, an arrow and its
+              // description. Split only their presentation: callers still receive
+              // the original label verbatim when the row is selected.
+              readonly property int descriptionSeparator: root.dmenuActive ? label.indexOf(" → ") : -1
+              readonly property string displayLabel: descriptionSeparator >= 0
+                ? label.slice(0, descriptionSeparator).trim() : label
+              readonly property string displayDetail: descriptionSeparator >= 0
+                ? label.slice(descriptionSeparator + 3).trim() + (detail ? " — " + detail : "") : detail
+              readonly property real selectedHeight: root.dmenuActive ? 128 : 72
+              readonly property real rowStep: root.dmenuActive ? 76 : 52
               width: xmbResultList.width
-              height: selected ? 72 : 48
+              height: selected ? selectedHeight : (root.dmenuActive ? 68 : 48)
               y: index < root.selectedIndex
                 ? categoryList.y - (root.selectedIndex - index) * rowStep
                 : (index === root.selectedIndex
                   ? selectedY
-                  : selectedY + 72 + (index - root.selectedIndex - 1) * rowStep)
+                  : selectedY + (root.dmenuActive ? 128 : 72) + (index - root.selectedIndex - 1) * rowStep)
               visible: y + height > 0 && y < xmbResultList.height
               opacity: selected ? 1.0 : 0.48
               Behavior on y { NumberAnimation { duration: 145; easing.type: Easing.OutCubic } }
@@ -514,7 +527,7 @@ Item {
 
                 Text {
                   width: parent.width
-                  text: xmbRow.label
+                  text: xmbRow.displayLabel
                   color: "white"
                   font.family: root.fontFamily
                   font.pixelSize: xmbRow.selected ? 23 : 17
@@ -525,11 +538,13 @@ Item {
 
                 Text {
                   width: parent.width
-                  visible: (root.filterText || root.dmenuActive) && xmbRow.detail.length > 0
-                  text: xmbRow.detail
+                  visible: (root.filterText || root.dmenuActive) && xmbRow.displayDetail.length > 0
+                  text: xmbRow.displayDetail
                   color: Qt.rgba(1, 1, 1, 0.55)
                   font.family: root.fontFamily
-                  font.pixelSize: 12
+                  font.pixelSize: root.dmenuActive ? (xmbRow.selected ? 18 : 15) : 12
+                  wrapMode: root.dmenuActive && xmbRow.selected ? Text.WordWrap : Text.NoWrap
+                  maximumLineCount: root.dmenuActive && xmbRow.selected ? 3 : 1
                   elide: Text.ElideRight
                 }
               }
