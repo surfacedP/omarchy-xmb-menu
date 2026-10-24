@@ -4,6 +4,7 @@ import Quickshell.Wayland
 import QtQuick
 import qs.Commons
 import qs.Ui
+import qs.services
 import "MenuModel.js" as MenuModel
 
 Item {
@@ -681,7 +682,22 @@ Item {
 
   // Shared application engine (entries, hidden filters, icons, launch,
   // removal), owned by the shell and also used by the standalone launcher.
-  readonly property var appLibrary: root.shell ? root.shell.appLibrary : null
+  // Qt can turn manifest.kinds into a sequence while loading third-party
+  // menus, causing the host to omit its scoped app library. Reuse the host's
+  // engine so filtering, icons and launch feedback stay consistent.
+  readonly property var appLibrary: root.shell && root.shell.appLibrary
+    ? root.shell.appLibrary : fallbackAppLibrary.item
+  onAppLibraryChanged: {
+    if (root.appLibrary && root.providersLoaded["apps"]) root.mergeAppRows()
+  }
+
+  Loader {
+    id: fallbackAppLibrary
+    active: !!root.shell && !root.shell.appLibrary
+    sourceComponent: Component {
+      AppLibrary { omarchyPath: root.omarchyPath }
+    }
+  }
   property bool deleteConfirmOpen: false
   property var deleteTarget: null
   onOpenedChanged: if (!opened) { deleteConfirmOpen = false; deleteTarget = null }

@@ -24,7 +24,10 @@ with an animated horizontal-and-vertical XMB layout.
 - No third-party packages or services
 
 The plugin reads Omarchy's existing menu definitions and uses the commands and
-application data already provided by the system.
+application data already provided by the system. If Omarchy does not inject an
+app library into a third-party menu, XMB loads the host's `qs.services.AppLibrary`
+as a fallback. This preserves Omarchy's app filtering, icon lookup, and launch
+feedback, but depends on that internal host module remaining available.
 
 ## Install
 
@@ -77,6 +80,12 @@ user additions in `~/.config/omarchy/extensions/omarchy-menu.jsonc`. It does not
 introduce a separate menu database.
 
 ## Attribution and trademarks
+
+Thanks to [gbflores](https://github.com/gbflores) for diagnosing and proposing
+an empty Apps menu fix in [PR #3](https://github.com/surfacedP/omarchy-xmb-menu/pull/3),
+and to [LeonardoM011](https://github.com/LeonardoM011) for identifying the Qt
+manifest-sequence issue and proposing reuse of the host's app library in the
+[PR discussion](https://github.com/surfacedP/omarchy-xmb-menu/pull/3#issuecomment-5759495158).
 
 This project is derived from the MIT-licensed Omarchy menu implementation by
 David Heinemeier Hansson and contributors. The XMB-inspired visual presentation
