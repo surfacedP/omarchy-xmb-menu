@@ -62,64 +62,25 @@ Item {
 
     // Slowly intersecting translucent ribbons, drawn only while the overlay is
     // visible. This keeps the organic XMB motion without shipping Sony assets
-    // or continuously animating a hidden, keep-loaded plugin.
-    Canvas {
-      id: waveCanvas
+    // or continuously animating a hidden, keep-loaded plugin. The ribbons run
+    // as a fragment shader (shaders/ribbons.frag): a full-screen Canvas
+    // rasterized them on the CPU every frame and held the menu near 30 fps.
+    ShaderEffect {
+      id: ribbons
       anchors.fill: parent
-      antialiasing: true
       property real phase: 0
+      property vector2d resolution: Qt.vector2d(width, height)
+      property real aa: 1 / Math.max(1, Screen.devicePixelRatio)
+      fragmentShader: Qt.resolvedUrl("shaders/ribbons.frag.qsb")
 
-      function waveY(x, base, amplitude, cycles, offset, detail) {
-        var t = x / Math.max(1, width)
-        return height * (base
-          + amplitude * Math.sin(t * Math.PI * 2 * cycles + phase + offset)
-          + amplitude * detail * Math.sin(t * Math.PI * 2 * (cycles * 0.47) - phase * 0.62 + offset * 1.7))
-      }
-
-      function drawRibbon(ctx, base, amplitude, cycles, offset, thickness, red, green, blue, alpha) {
-        var step = Math.max(18, width / 110)
-        var x
-        ctx.beginPath()
-        ctx.moveTo(0, waveY(0, base, amplitude, cycles, offset, 0.42))
-        for (x = step; x < width; x += step)
-          ctx.lineTo(x, waveY(x, base, amplitude, cycles, offset, 0.42))
-        ctx.lineTo(width, waveY(width, base, amplitude, cycles, offset, 0.42))
-
-        for (x = width; x >= 0; x -= step) {
-          var breathing = 0.76 + 0.24 * Math.sin((x / Math.max(1, width)) * Math.PI * 3 - phase + offset)
-          ctx.lineTo(x, waveY(x, base, amplitude, cycles, offset, 0.42) + height * thickness * breathing)
-        }
-        ctx.closePath()
-
-        var gradient = ctx.createLinearGradient(0, height * (base - amplitude), 0,
-                                                height * (base + amplitude + thickness))
-        gradient.addColorStop(0, "rgba(" + red + "," + green + "," + blue + ",0)")
-        gradient.addColorStop(0.36, "rgba(" + red + "," + green + "," + blue + "," + alpha + ")")
-        gradient.addColorStop(1, "rgba(" + red + "," + green + "," + blue + ",0)")
-        ctx.fillStyle = gradient
-        ctx.fill()
-      }
-
-      onPaint: {
-        var ctx = getContext("2d")
-        ctx.clearRect(0, 0, width, height)
-        drawRibbon(ctx, 0.53, 0.055, 0.92, 0.2, 0.055, 72, 174, 255, 0.10)
-        drawRibbon(ctx, 0.58, 0.040, 1.13, 2.3, 0.024, 168, 220, 255, 0.13)
-        drawRibbon(ctx, 0.62, 0.072, 0.71, 4.5, 0.060, 35, 121, 232, 0.075)
-        drawRibbon(ctx, 0.66, 0.045, 1.26, 1.1, 0.018, 204, 235, 255, 0.12)
-        drawRibbon(ctx, 0.70, 0.060, 0.84, 3.4, 0.075, 49, 142, 238, 0.055)
-      }
-
-      onPhaseChanged: requestPaint()
-      onWidthChanged: requestPaint()
-      onHeightChanged: requestPaint()
-
+      // The slower sine turns at 0.62x phase, so a 2π loop jumped every
+      // cycle; at 100π both turn whole (50 and 31 times) and wrap seamlessly.
       NumberAnimation {
-        target: waveCanvas
+        target: ribbons
         property: "phase"
         from: 0
-        to: Math.PI * 2
-        duration: 22000
+        to: Math.PI * 100
+        duration: 22000 * 50
         loops: Animation.Infinite
         running: panel.visible
       }
@@ -638,7 +599,19 @@ Item {
   }
   property bool deleteConfirmOpen: false
   property var deleteTarget: null
-  onOpenedChanged: if (!opened) { deleteConfirmOpen = false; deleteTarget = null }
+  property real lastIconRefresh: 0
+  onOpenedChanged: if (!opened) {
+    deleteConfirmOpen = false
+    deleteTarget = null
+    // The shell may start before first-install packages have finished placing
+    // their icons, so rescan even when the desktop entry list did not change.
+    // The scan feeds ~9k paths through JS; do it while the menu is closed and
+    // at most every five minutes, not on every open.
+    if (root.appLibrary && Date.now() - root.lastIconRefresh > 300000) {
+      root.lastIconRefresh = Date.now()
+      root.appLibrary.refreshIcons()
+    }
+  }
   // Bound to the central [menu] section in shell.toml via Color.qml.
   // Each color already includes its alpha companion (composed in the
   // singleton), so consumers can drop them straight into a Rectangle.
@@ -1432,10 +1405,6 @@ Item {
       invalidateVolatileProvider(activeMenu)
       loadProviderForMenu(activeMenu)
     }
-    // The shell may start before first-install packages have finished placing
-    // their icons. Refresh here even when the desktop entry list did not change.
-    if (root.appLibrary) root.appLibrary.refreshIcons()
-
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
@@ -1614,10 +1583,15 @@ Item {
         if (tag === "w") nextWhen[id] = value
         else if (tag === "c") nextChecked[id] = value
       }
-      root.whenResults = nextWhen
-      root.checkedResults = nextChecked
-      root.rebuildCategories()
-      if (root.opened) root.rebuildDisplay()
+      // Every open re-asks, and the answers rarely change. Rebuilding anyway
+      // recreates every row mid-navigation, so only rebuild on a difference.
+      if (JSON.stringify(nextWhen) !== JSON.stringify(root.whenResults)
+          || JSON.stringify(nextChecked) !== JSON.stringify(root.checkedResults)) {
+        root.whenResults = nextWhen
+        root.checkedResults = nextChecked
+        root.rebuildCategories()
+        if (root.opened) root.rebuildDisplay()
+      }
       // Run the evaluation that had to stand aside. Deferred by a turn so the
       // process is settled before its command is set again.
       if (root.guardsPending) Qt.callLater(function() { root.evaluateGuards() })
