@@ -1410,7 +1410,17 @@ Item {
     filterText = ""
   }
 
+  // A caller blocked in omarchy-menu-select/input polls for its done file
+  // until it appears. When a newer request or the plain menu takes over the
+  // surface, hand it an empty answer so it exits instead of polling forever.
+  function releaseRequest() {
+    if (root.requestActive && root.doneFile)
+      Quickshell.execDetached(["touch", root.doneFile])
+    root.requestActive = false
+  }
+
   function openExistingMenu(initialMenu) {
+    root.releaseRequest()
     requestSerial += 1
     mode = "menu"
     requestActive = false
@@ -1440,6 +1450,7 @@ Item {
   }
 
   function openDmenu(payload) {
+    root.releaseRequest()
     requestSerial += 1
     mode = payload.mode === "input" ? "input" : "select"
     dmenuPrompt = String(payload.prompt || (mode === "input" ? "Input" : "Select"))
